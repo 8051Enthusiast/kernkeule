@@ -1,0 +1,17 @@
+[package]
+name = "kernkeule"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["8051enthusiast"]
+description = "Turn your process images into zombies"
+repository = "https://github.com/8051enthusiast/kernkeule"
+
+[dependencies]
+getrandom = "0.2.15"
+libc = "0.2.155"
+nix = { version = "0.29.0", features = ["ptrace", "uio", "resource", "poll"] }
+pidfd = "0.2.4"
+proc-maps = "0.3.2"
+which = "6.0.2"
+xmas-elf = "0.9.1"
