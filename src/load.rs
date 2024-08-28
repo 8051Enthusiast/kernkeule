@@ -254,6 +254,7 @@ const PLATFORM: &str = "x86_64";
 fn construct_auxvec(
     exec: &Path,
     args: &[OsString],
+    env: &[(OsString, OsString)],
     load: &LoadInfo,
     vdso_base: usize,
     user: &UserInfo,
@@ -263,8 +264,8 @@ fn construct_auxvec(
     for arg in args {
         auxv.push_arg(arg);
     }
-    for (key, val) in std::env::vars_os() {
-        auxv.push_env(&key, &val);
+    for (key, val) in env {
+        auxv.push_env(key, val);
     }
     let mut random_bytes: [u8; 16] = [0; 16];
     match getrandom::getrandom(&mut random_bytes) {
@@ -328,7 +329,18 @@ pub fn setup_proc(proc: &mut Process, exec: &Path, args: &[OsString]) -> std::io
     let user = UserInfo::new_from_proc(proc)?;
     let stack_top = initialize_stack(proc)?;
     let vdso_base = proc.vdso_base();
-    let auxv = construct_auxvec(exec, args, &load, vdso_base, &user)?;
+    let original_state = proc.original_state();
+    let env = std::env::vars_os()
+        .chain(std::iter::once((
+            "KERNKEULE_MAPS".into(),
+            original_state.memory_segment_env_string(),
+        )))
+        .chain(std::iter::once((
+            "KERNKEULE_SP".into(),
+            original_state.stack_pointer_env_string(),
+        )))
+        .collect::<Vec<_>>();
+    let auxv = construct_auxvec(exec, args, &env, &load, vdso_base, &user)?;
     let sp = initialize_auxvec(proc, &auxv, stack_top)?;
     let real_entry = load.interp_info.as_ref().map_or(load.entry, |x| x.entry);
     proc.init_entry(sp, real_entry)?;

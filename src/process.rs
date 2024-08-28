@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::os::fd::{AsRawFd, RawFd};
 use std::time::Duration;
 use std::{io, mem};
@@ -247,11 +248,33 @@ impl RemoteFd {
     }
 }
 
+#[derive(Clone)]
+pub struct OriginalState {
+    pub readable_memory_segments: Vec<(usize, usize)>,
+    pub initial_stack_pointer: usize,
+}
+
+impl OriginalState {
+    pub fn memory_segment_env_string(&self) -> OsString {
+        self.readable_memory_segments
+            .iter()
+            .map(|(offset, size)| format!("{offset:x}+{size:x}"))
+            .collect::<Vec<_>>()
+            .join(":")
+            .into()
+    }
+
+    pub fn stack_pointer_env_string(&self) -> OsString {
+        format!("{:x}", self.initial_stack_pointer).into()
+    }
+}
+
 pub struct Process {
     pid: Pid,
     thread: Pid,
     vdso: Vdso,
     tracer_pidfd: RemoteFd,
+    state: OriginalState,
 }
 
 impl Process {
@@ -272,11 +295,22 @@ impl Process {
         }
         res?;
 
+        let readable_memory_segments = proc_maps::get_process_maps(pid.as_raw())?
+            .into_iter()
+            .filter(|x| x.is_read())
+            .map(|x| (x.start(), x.size()))
+            .collect();
+        let initial_stack_pointer = ptrace::getregs(pid)?.rsp as usize;
+
         let mut proc = Self {
             pid,
             // after a fork, pid == thread id
             thread: pid,
             vdso,
+            state: OriginalState {
+                readable_memory_segments,
+                initial_stack_pointer,
+            },
             tracer_pidfd: RemoteFd(0),
         };
 
@@ -486,6 +520,11 @@ impl Process {
         ptrace::setregset::<NT_PRFPREG>(self.pid, fpregs)?;
         ptrace::setregs(self.pid, regs)?;
         Ok(())
+    }
+
+    /// gets the original memory maps and stack pointers of the process
+    pub fn original_state(&self) -> &OriginalState {
+        &self.state
     }
 
     /// continue the target process. returns a pidfd to the target process
